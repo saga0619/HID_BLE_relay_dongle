@@ -6,40 +6,67 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/pwm.h>
 #include <zephyr/drivers/uart.h>
 #include <string.h>
-#include <zephyr/random/rand32.h>
 
 #include <zephyr/usb/usb_device.h>
 #include <zephyr/usb/class/usb_hid.h>
 #include <zephyr/usb/class/usb_cdc.h>
 
-#define LOG_LEVEL LOG_LEVEL_DBG
-LOG_MODULE_REGISTER(main);
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/services/nus.h>
+#include <zephyr/bluetooth/conn.h>
 
+#include "hid_keyboard.h"
+
+
+#undef BT_UUID_NUS_SRV_VAL
+#undef BT_UUID_NUS_RX_VAL
+#undef BT_UUID_NUS_TX_VAL
+
+/* Service: 597f1290-5b99-477d-9261-f0ed801fc566 → LE: 66 c5 1f 80 ed f0 61 92 7d 47 99 5b 90 12 7f 59 */
+#define BT_UUID_NUS_SRV_VAL \
+	0x66, 0xc5, 0x1f, 0x80, \
+	0xed, 0xf0, 0x61, 0x92, \
+	0x7d, 0x47, 0x99, 0x5b, \
+	0x90, 0x12, 0x7f, 0x59
+
+/* RX: 597f1291-5b99-477d-9261-f0ed801fc566 → LE: 66 c5 1f 80 ed f0 61 92 7d 47 99 5b 91 12 7f 59 */
+#define BT_UUID_NUS_RX_VAL \
+	0x66, 0xc5, 0x1f, 0x80, \
+	0xed, 0xf0, 0x61, 0x92, \
+	0x7d, 0x47, 0x99, 0x5b, \
+	0x91, 0x12, 0x7f, 0x59
+
+/* TX: 597f1292-5b99-477d-9261-f0ed801fc566 → LE: 66 c5 1f 80 ed f0 61 92 7d 47 99 5b 92 12 7f 59 */
+#define BT_UUID_NUS_TX_VAL \
+	0x66, 0xc5, 0x1f, 0x80, \
+	0xed, 0xf0, 0x61, 0x92, \
+	0x7d, 0x47, 0x99, 0x5b, \
+	0x92, 0x12, 0x7f, 0x59
+
+#define DEVICE_NAME		CONFIG_BT_DEVICE_NAME
+#define DEVICE_NAME_LEN		(sizeof(DEVICE_NAME) - 1)
+
+#define LED0_NODE DT_ALIAS(led0)
+#define LED1_NODE DT_ALIAS(led1)
+#define LED2_NODE DT_ALIAS(led2)
+#define LED3_NODE DT_ALIAS(led3)
+
+static const struct gpio_dt_spec led0 = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
+
+static const struct pwm_dt_spec red_led = PWM_DT_SPEC_GET(DT_ALIAS(pwm_led0));
+static const struct pwm_dt_spec green_led = PWM_DT_SPEC_GET(DT_ALIAS(pwm_led1));
+static const struct pwm_dt_spec blue_led = PWM_DT_SPEC_GET(DT_ALIAS(pwm_led2));
+
+// #define HID_REPORT_SIZE 8
 #define SW0_NODE DT_ALIAS(sw0)
 
 #if DT_NODE_HAS_STATUS(SW0_NODE, okay)
 static const struct gpio_dt_spec sw0_gpio = GPIO_DT_SPEC_GET(SW0_NODE, gpios);
 #endif
 
-#define SW1_NODE DT_ALIAS(sw1)
-
-#if DT_NODE_HAS_STATUS(SW1_NODE, okay)
-static const struct gpio_dt_spec sw1_gpio = GPIO_DT_SPEC_GET(SW1_NODE, gpios);
-#endif
-
-#define SW2_NODE DT_ALIAS(sw2)
-
-#if DT_NODE_HAS_STATUS(SW2_NODE, okay)
-static const struct gpio_dt_spec sw2_gpio = GPIO_DT_SPEC_GET(SW2_NODE, gpios);
-#endif
-
-#define SW3_NODE DT_ALIAS(sw3)
-
-#if DT_NODE_HAS_STATUS(SW3_NODE, okay)
-static const struct gpio_dt_spec sw3_gpio = GPIO_DT_SPEC_GET(SW3_NODE, gpios);
-#endif
 
 /* Event FIFO */
 
@@ -47,8 +74,8 @@ K_FIFO_DEFINE(evt_fifo);
 
 enum evt_t {
 	GPIO_BUTTON_0	= 0x00,
-	GPIO_BUTTON_1	= 0x01,
-	GPIO_BUTTON_2	= 0x02,
+	LED_SIGNAL_0	= 0x01,
+	KEY_UNKNOWN 	= 0x02,
 	GPIO_BUTTON_3	= 0x03,
 	CDC_UP		= 0x04,
 	CDC_DOWN	= 0x05,
@@ -108,14 +135,14 @@ static inline struct app_evt_t *app_evt_alloc(void)
 			  sizeof(struct app_evt_t),
 			  K_NO_WAIT);
 	if (ev == NULL) {
-		LOG_ERR("APP event allocation failed!");
+		printk("APP event allocation failed!");
 		app_evt_flush();
 
 		ev = k_heap_alloc(&event_elem_pool,
 				  sizeof(struct app_evt_t),
 				  K_NO_WAIT);
 		if (ev == NULL) {
-			LOG_ERR("APP event memory corrupted.");
+			printk("APP event memory corrupted.");
 			__ASSERT_NO_MSG(0);
 			return NULL;
 		}
@@ -127,68 +154,27 @@ static inline struct app_evt_t *app_evt_alloc(void)
 
 /* HID */
 
-static const uint8_t hid_mouse_report_desc[] = HID_MOUSE_REPORT_DESC(2);
-static const uint8_t hid_kbd_report_desc[] = HID_KEYBOARD_REPORT_DESC();
 
 static K_SEM_DEFINE(evt_sem, 0, 1);	/* starts off "not available" */
-static K_SEM_DEFINE(usb_sem, 1, 1);	/* starts off "available" */
+
 static struct gpio_callback gpio_callbacks[4];
 
-static char data_buf_mouse[64], data_buf_kbd[64];
-static char string[64];
-static uint8_t chr_ptr_mouse, chr_ptr_kbd, str_pointer;
 
-#define MOUSE_BTN_REPORT_POS	0
-#define MOUSE_X_REPORT_POS	1
-#define MOUSE_Y_REPORT_POS	2
+uint8_t global_hid_report[HID_REPORT_SIZE_L] = {0};
 
-#define MOUSE_BTN_LEFT		BIT(0)
-#define MOUSE_BTN_RIGHT		BIT(1)
-#define MOUSE_BTN_MIDDLE	BIT(2)
 
-static const char *welcome	=	"Welcome to ";
-static const char *banner0	=	"\r\n"
-					"Supported commands:\r\n"
-					"up    - moves the mouse up\r\n"
-					"down  - moves the mouse down\r\n"
-					"right - moves the mouse to right\r\n"
-					"left  - moves the mouse to left\r\n";
-static const char *banner1	=	"\r\n"
-					"Enter a string and terminate "
-					"it with ENTER.\r\n"
-					"It will be sent via HID "
-					"when BUTTON 2 is pressed.\r\n"
-					"You can modify it by sending "
-					"a new one here.\r\n";
 static const char *gpio0	=	"Button 0 pressed\r\n";
-static const char *gpio1	=	"Button 1 pressed\r\n";
-static const char *gpio2	=	"Button 2 pressed\r\n";
-static const char *gpio3	=	"Button 3 pressed\r\n";
 static const char *unknown	=	"Command not recognized.\r\n";
-static const char *up		=	"Mouse up\r\n";
-static const char *down		=	"Mouse down\r\n";
-static const char *left		=	"Mouse left\r\n";
-static const char *right	=	"Mouse right\r\n";
 static const char *evt_fail	=	"Unknown event detected!\r\n";
 static const char *set_str	=	"String set to: ";
 static const char *endl		=	"\r\n";
 
-static void in_ready_cb(const struct device *dev)
-{
-	ARG_UNUSED(dev);
 
-	k_sem_give(&usb_sem);
-}
-
-static const struct hid_ops ops = {
-	.int_in_ready = in_ready_cb,
-};
-
-static void clear_mouse_report(void)
+static void singal_led(void)
 {
 	struct app_evt_t *new_evt = app_evt_alloc();
 
-	new_evt->event_type = HID_MOUSE_CLEAR;
+	new_evt->event_type = LED_SIGNAL_0;
 	app_evt_put(new_evt);
 	k_sem_give(&evt_sem);
 }
@@ -201,163 +187,10 @@ static void clear_kbd_report(void)
 	app_evt_put(new_evt);
 	k_sem_give(&evt_sem);
 }
-
-static int ascii_to_hid(uint8_t ascii)
-{
-	if (ascii < 32) {
-		/* Character not supported */
-		return -1;
-	} else if (ascii < 48) {
-		/* Special characters */
-		switch (ascii) {
-		case 32:
-			return HID_KEY_SPACE;
-		case 33:
-			return HID_KEY_1;
-		case 34:
-			return HID_KEY_APOSTROPHE;
-		case 35:
-			return HID_KEY_3;
-		case 36:
-			return HID_KEY_4;
-		case 37:
-			return HID_KEY_5;
-		case 38:
-			return HID_KEY_7;
-		case 39:
-			return HID_KEY_APOSTROPHE;
-		case 40:
-			return HID_KEY_9;
-		case 41:
-			return HID_KEY_0;
-		case 42:
-			return HID_KEY_8;
-		case 43:
-			return HID_KEY_EQUAL;
-		case 44:
-			return HID_KEY_COMMA;
-		case 45:
-			return HID_KEY_MINUS;
-		case 46:
-			return HID_KEY_DOT;
-		case 47:
-			return HID_KEY_SLASH;
-		default:
-			return -1;
-		}
-	} else if (ascii < 58) {
-		/* Numbers */
-		if (ascii == 48U) {
-			return HID_KEY_0;
-		} else {
-			return ascii - 19;
-		}
-	} else if (ascii < 65) {
-		/* Special characters #2 */
-		switch (ascii) {
-		case 58:
-			return HID_KEY_SEMICOLON;
-		case 59:
-			return HID_KEY_SEMICOLON;
-		case 60:
-			return HID_KEY_COMMA;
-		case 61:
-			return HID_KEY_EQUAL;
-		case 62:
-			return HID_KEY_DOT;
-		case 63:
-			return HID_KEY_SLASH;
-		case 64:
-			return HID_KEY_2;
-		default:
-			return -1;
-		}
-	} else if (ascii < 91) {
-		/* Uppercase characters */
-		return ascii - 61U;
-	} else if (ascii < 97) {
-		/* Special characters #3 */
-		switch (ascii) {
-		case 91:
-			return HID_KEY_LEFTBRACE;
-		case 92:
-			return HID_KEY_BACKSLASH;
-		case 93:
-			return HID_KEY_RIGHTBRACE;
-		case 94:
-			return HID_KEY_6;
-		case 95:
-			return HID_KEY_MINUS;
-		case 96:
-			return HID_KEY_GRAVE;
-		default:
-			return -1;
-		}
-	} else if (ascii < 123) {
-		/* Lowercase letters */
-		return ascii - 93;
-	} else if (ascii < 128) {
-		/* Special characters #4 */
-		switch (ascii) {
-		case 123:
-			return HID_KEY_LEFTBRACE;
-		case 124:
-			return HID_KEY_BACKSLASH;
-		case 125:
-			return HID_KEY_RIGHTBRACE;
-		case 126:
-			return HID_KEY_GRAVE;
-		case 127:
-			return HID_KEY_DELETE;
-		default:
-			return -1;
-		}
-	}
-
-	return -1;
-}
-
-static bool needs_shift(uint8_t ascii)
-{
-	if ((ascii < 33) || (ascii == 39U)) {
-		return false;
-	} else if ((ascii >= 33U) && (ascii < 44)) {
-		return true;
-	} else if ((ascii >= 44U) && (ascii < 58)) {
-		return false;
-	} else if ((ascii == 59U) || (ascii == 61U)) {
-		return false;
-	} else if ((ascii >= 58U) && (ascii < 91)) {
-		return true;
-	} else if ((ascii >= 91U) && (ascii < 94)) {
-		return false;
-	} else if ((ascii == 94U) || (ascii == 95U)) {
-		return true;
-	} else if ((ascii > 95) && (ascii < 123)) {
-		return false;
-	} else if ((ascii > 122) && (ascii < 127)) {
-		return true;
-	} else {
-		return false;
-	}
-}
-
 /* CDC ACM */
 
 static volatile bool data_transmitted;
 static volatile bool data_arrived;
-
-static void flush_buffer_mouse(void)
-{
-	chr_ptr_mouse = 0U;
-	memset(data_buf_mouse, 0, sizeof(data_buf_mouse));
-}
-
-static void flush_buffer_kbd(void)
-{
-	chr_ptr_kbd = 0U;
-	memset(data_buf_kbd, 0, sizeof(data_buf_kbd));
-}
 
 static void write_data(const struct device *dev, const char *buf, int len)
 {
@@ -379,87 +212,6 @@ static void write_data(const struct device *dev, const char *buf, int len)
 	uart_irq_tx_disable(dev);
 }
 
-static void cdc_mouse_int_handler(const struct device *dev, void *user_data)
-{
-	ARG_UNUSED(user_data);
-
-	uart_irq_update(dev);
-
-	if (uart_irq_tx_ready(dev)) {
-		data_transmitted = true;
-	}
-
-	if (!uart_irq_rx_ready(dev)) {
-		return;
-	}
-	uint32_t bytes_read;
-
-	while ((bytes_read = uart_fifo_read(dev,
-		(uint8_t *)data_buf_mouse+chr_ptr_mouse,
-		sizeof(data_buf_mouse)-chr_ptr_mouse))) {
-		chr_ptr_mouse += bytes_read;
-		if (data_buf_mouse[chr_ptr_mouse - 1] == '\r') {
-			/* ENTER */
-			struct app_evt_t *ev = app_evt_alloc();
-
-			data_buf_mouse[chr_ptr_mouse - 1] = '\0';
-
-			if (!strcmp(data_buf_mouse, "up")) {
-				ev->event_type = CDC_UP;
-			} else if (!strcmp(data_buf_mouse, "down")) {
-				ev->event_type = CDC_DOWN;
-			} else if (!strcmp(data_buf_mouse, "right")) {
-				ev->event_type = CDC_RIGHT;
-			} else if (!strcmp(data_buf_mouse, "left")) {
-				ev->event_type = CDC_LEFT;
-			} else {
-				ev->event_type = CDC_UNKNOWN;
-			}
-			flush_buffer_mouse();
-			app_evt_put(ev);
-			k_sem_give(&evt_sem);
-		}
-
-		if (chr_ptr_mouse >= sizeof(data_buf_mouse)) {
-			LOG_WRN("Buffer overflow");
-			flush_buffer_mouse();
-		}
-	}
-}
-
-static void cdc_kbd_int_handler(const struct device *dev, void *user_data)
-{
-	ARG_UNUSED(user_data);
-
-	uart_irq_update(dev);
-
-	if (uart_irq_tx_ready(dev)) {
-		data_transmitted = true;
-	}
-
-	if (!uart_irq_rx_ready(dev)) {
-		return;
-	}
-	uint32_t bytes_read;
-
-	while ((bytes_read = uart_fifo_read(dev,
-		(uint8_t *)data_buf_kbd+chr_ptr_kbd,
-		sizeof(data_buf_kbd)-chr_ptr_kbd))) {
-		chr_ptr_kbd += bytes_read;
-		if (data_buf_kbd[chr_ptr_kbd - 1] == '\r') {
-			/* ENTER */
-			struct app_evt_t *ev = app_evt_alloc();
-
-			data_buf_kbd[chr_ptr_kbd - 1] = '\0';
-			strcpy(string, data_buf_kbd);
-			ev->event_type = CDC_STRING;
-			flush_buffer_kbd();
-			app_evt_put(ev);
-			k_sem_give(&evt_sem);
-		}
-	}
-}
-
 /* Devices */
 
 static void btn0(const struct device *gpio, struct gpio_callback *cb,
@@ -472,49 +224,13 @@ static void btn0(const struct device *gpio, struct gpio_callback *cb,
 	k_sem_give(&evt_sem);
 }
 
-#if DT_NODE_HAS_STATUS(SW1_NODE, okay)
-static void btn1(const struct device *gpio, struct gpio_callback *cb,
-		 uint32_t pins)
-{
-	struct app_evt_t *ev = app_evt_alloc();
-
-	ev->event_type = GPIO_BUTTON_1,
-	app_evt_put(ev);
-	k_sem_give(&evt_sem);
-}
-#endif
-
-#if DT_NODE_HAS_STATUS(SW2_NODE, okay)
-static void btn2(const struct device *gpio, struct gpio_callback *cb,
-		 uint32_t pins)
-{
-	struct app_evt_t *ev = app_evt_alloc();
-
-	ev->event_type = GPIO_BUTTON_2,
-	app_evt_put(ev);
-	k_sem_give(&evt_sem);
-}
-#endif
-
-#if DT_NODE_HAS_STATUS(SW3_NODE, okay)
-static void btn3(const struct device *gpio, struct gpio_callback *cb,
-		 uint32_t pins)
-{
-	struct app_evt_t *ev = app_evt_alloc();
-
-	ev->event_type = GPIO_BUTTON_3,
-	app_evt_put(ev);
-	k_sem_give(&evt_sem);
-}
-#endif
-
 int callbacks_configure(const struct gpio_dt_spec *gpio,
 			void (*handler)(const struct device *, struct gpio_callback*,
 					uint32_t),
 			struct gpio_callback *callback)
 {
 	if (!device_is_ready(gpio->port)) {
-		LOG_ERR("%s: device not ready.", gpio->port->name);
+		printk("%s: device not ready.", gpio->port->name);
 		return -ENODEV;
 	}
 
@@ -529,253 +245,359 @@ int callbacks_configure(const struct gpio_dt_spec *gpio,
 
 static void status_cb(enum usb_dc_status_code status, const uint8_t *param)
 {
-	LOG_INF("Status %d", status);
+	printk("Status %d", status);
 }
+
+static struct bt_uuid_128 my_service_uuid = BT_UUID_INIT_128(
+    0x66, 0xc5, 0x1f, 0x80,
+    0xed, 0xf0, 0x61, 0x92,
+    0x7d, 0x47, 0x99, 0x5b,
+    0x9a, 0x12, 0x7f, 0x59
+);
+
+static const struct bt_data ad[] = {
+	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+	BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
+};
+
+static const struct bt_data sd[] = {
+	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_NUS_SRV_VAL),
+};
+
+static bool bt_disconnected = true;
+
+static void notif_enabled(bool enabled, void *ctx)
+{
+	ARG_UNUSED(ctx);
+
+	printk("%s() - %s\n", __func__, (enabled ? "Enabled" : "Disabled"));
+
+	if(enabled){
+		bt_disconnected = false;
+
+	}
+	else{
+		bt_disconnected = true;
+		
+	}
+}
+static uint8_t pressed_keys[6] = {0};
+static uint8_t current_modifiers = 0;
+
+static void add_key(uint8_t key)
+{
+    for (int i = 0; i < 6; i++) {
+        if (pressed_keys[i] == 0) {
+            pressed_keys[i] = key;
+            return;
+        }
+    }
+    /* 배열이 가득 찼을 경우 로직(에러 처리 등) 필요 시 추가 */
+}
+
+/* pressed_keys 배열에서 key 제거 */
+static void remove_key(uint8_t key)
+{
+    for (int i = 0; i < 6; i++) {
+        if (pressed_keys[i] == key) {
+            pressed_keys[i] = 0;
+        }
+    }
+    
+	return;
+}
+
+/* 전체 상태(Modifiers + pressed_keys[])를 바탕으로 HID 리포트 전송 */
+static void send_full_report(void)
+{
+    uint8_t rep[8] = {0};
+
+    /* rep[0] : Modifier 비트마스크 */
+    rep[0] = current_modifiers;
+
+    /* rep[1] : Reserved(항상 0) */
+    rep[1] = 0;
+
+    /* rep[2..7] : 동시에 눌려있는 일반 키(최대 6개) */
+    for (int i = 0; i < 6; i++) {
+        rep[i + 2] = pressed_keys[i];
+    }
+
+    if (hid_keyboard_send_report(rep)) {
+        printk("Failed to send HID report\n");
+    }
+}
+
+/* modifier 키 비트마스크를 업데이트해주는 함수 */
+void update_modifiers(uint8_t modifier_mask, bool press)
+{
+    if (press) {
+        current_modifiers |= modifier_mask;
+    } else {
+        current_modifiers &= ~modifier_mask;
+    }
+	// printk("Current Modifiers: 0x%02x \n", current_modifiers);
+}
+
+
+static void received(struct bt_conn *conn, const void *data, uint16_t len, void *ctx)
+{
+	char message[CONFIG_BT_L2CAP_TX_MTU + 1] = "";
+	
+	ARG_UNUSED(conn);
+	ARG_UNUSED(ctx);
+
+    size_t copy_len = len < sizeof(message) - 1 ? len : sizeof(message) - 1;
+    memcpy(message, data, copy_len);
+    message[copy_len] = '\0'; // Null-terminate the string
+
+	// static bool mod_act = false;
+
+ 	char *token = strtok(message, "\n");
+    while (token != NULL) {
+        char action;
+        uint32_t qt_key;
+
+        // Parse the action and key code
+        if (sscanf(token, "%c:0x%x", &action, &qt_key) == 2) {
+            bool is_press = (action == 'P');
+
+            uint8_t hid_key = 0;
+            uint8_t modifier_mask  = 0;
+
+            if (get_hid_key(qt_key, &hid_key, &modifier_mask )) {
+                if (modifier_mask != 0) {
+                    // It's a modifier key
+                    update_modifiers(modifier_mask, is_press);
+					// printk("Modifier mask: 0x%02x\n", modifier_mask);
+
+					if (hid_key !=0)
+					{	//modifier key with regular key
+						if (is_press) {
+							add_key(hid_key);
+						} else{
+							remove_key(hid_key);
+						}
+					}
+
+                } else {
+                    // It's a regular key
+                    if (is_press) {
+						add_key(hid_key);
+					} else{
+						remove_key(hid_key);
+                    }
+                }
+
+				send_full_report();
+				singal_led();
+            }
+			else{
+				if(!is_press)
+				{
+					printk("Key not found: %c:0x%x\n", action, qt_key);
+					struct app_evt_t *ev = app_evt_alloc();
+
+					ev->event_type = KEY_UNKNOWN,
+					app_evt_put(ev);
+					k_sem_give(&evt_sem);
+
+				}
+			}
+        }
+
+        // Get the next token
+        token = strtok(NULL, "\n");
+	}
+
+}
+
+struct bt_nus_cb nus_listener = {
+	.notif_enabled = notif_enabled,
+	.received = received,
+};
+
 
 #define DEVICE_AND_COMMA(node_id) DEVICE_DT_GET(node_id),
 
 int main(void)
-{
-	const struct device *cdc_dev[] = {
-		DT_FOREACH_STATUS_OKAY(zephyr_cdc_acm_uart, DEVICE_AND_COMMA)
-	};
-	BUILD_ASSERT(ARRAY_SIZE(cdc_dev) >= 2, "Not enough CDC ACM instances");
-	const struct device *hid0_dev, *hid1_dev;
+{	
+	if (!gpio_is_ready_dt(&led0)) {
+		return 0;
+	}
+	gpio_pin_configure_dt(&led0, GPIO_OUTPUT_INACTIVE);
+
+	gpio_pin_set_dt(&led0, 1);
+	k_msleep(50);
+	gpio_pin_set_dt(&led0, 0);
+	k_msleep(50);
+
+	if (!device_is_ready(blue_led.dev) || !device_is_ready(green_led.dev) || !device_is_ready(red_led.dev))
+	{
+		printk("Error: PWM device not ready.\n");
+		return 0;
+	}
+
+	const struct device *cdc_dev = DEVICE_DT_GET_ONE(zephyr_cdc_acm_uart);
+
 	struct app_evt_t *ev;
-	uint32_t dtr = 0U;
 	int ret;
+
+	hid_keyboard_init();
+
+	/* Config BT */
+	int err;
+	err = bt_enable(NULL);
+	if (err) {
+		printk("Failed to enable bluetooth: %d\n", err);
+		return err;
+	}
+
+	err = bt_le_adv_start(BT_LE_ADV_CONN, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	if (err) {
+		printk("Failed to start advertising: %d\n", err);
+		return err;
+	}
+
+	err = bt_nus_cb_register(&nus_listener, NULL);
+	if (err) {
+		printk("Failed to register NUS callback: %d\n", err);
+		return err;
+	}
+	
 
 	/* Configure devices */
 
-	hid0_dev = device_get_binding("HID_0");
-	if (hid0_dev == NULL) {
-		LOG_ERR("Cannot get USB HID 0 Device");
+
+
+	if (!device_is_ready(cdc_dev)) {
+		printk("CDC ACM device %s is not ready",
+			cdc_dev->name);
 		return 0;
 	}
 
-	hid1_dev = device_get_binding("HID_1");
-	if (hid1_dev == NULL) {
-		LOG_ERR("Cannot get USB HID 1 Device");
-		return 0;
-	}
-
-	for (int idx = 0; idx < ARRAY_SIZE(cdc_dev); idx++) {
-		if (!device_is_ready(cdc_dev[idx])) {
-			LOG_ERR("CDC ACM device %s is not ready",
-				cdc_dev[idx]->name);
-			return 0;
-		}
-	}
 
 	if (callbacks_configure(&sw0_gpio, &btn0, &gpio_callbacks[0])) {
-		LOG_ERR("Failed configuring button 0 callback.");
+		printk("Failed configuring button 0 callback.");
 		return 0;
 	}
-
-#if DT_NODE_HAS_STATUS(SW1_NODE, okay)
-	if (callbacks_configure(&sw1_gpio, &btn1, &gpio_callbacks[1])) {
-		LOG_ERR("Failed configuring button 1 callback.");
-		return 0;
-	}
-#endif
-
-#if DT_NODE_HAS_STATUS(SW2_NODE, okay)
-	if (callbacks_configure(&sw2_gpio, &btn2, &gpio_callbacks[2])) {
-		LOG_ERR("Failed configuring button 2 callback.");
-		return 0;
-	}
-#endif
-
-#if DT_NODE_HAS_STATUS(SW3_NODE, okay)
-	if (callbacks_configure(&sw3_gpio, &btn3, &gpio_callbacks[3])) {
-		LOG_ERR("Failed configuring button 3 callback.");
-		return 0;
-	}
-#endif
-
-	/* Initialize HID */
-
-	usb_hid_register_device(hid0_dev, hid_mouse_report_desc,
-				sizeof(hid_mouse_report_desc), &ops);
-
-	usb_hid_register_device(hid1_dev, hid_kbd_report_desc,
-				sizeof(hid_kbd_report_desc), &ops);
-
-	usb_hid_init(hid0_dev);
-	usb_hid_init(hid1_dev);
+	
 
 	ret = usb_enable(status_cb);
 	if (ret != 0) {
-		LOG_ERR("Failed to enable USB");
+		printk("Failed to enable USB");
 		return 0;
 	}
 
-	/* Initialize CDC ACM */
-	for (int idx = 0; idx < ARRAY_SIZE(cdc_dev); idx++) {
-		LOG_INF("Wait for DTR on %s", cdc_dev[idx]->name);
-		while (1) {
-			uart_line_ctrl_get(cdc_dev[idx],
-					   UART_LINE_CTRL_DTR,
-					   &dtr);
-			if (dtr) {
-				break;
-			} else {
-				/* Give CPU resources to low priority threads. */
-				k_sleep(K_MSEC(100));
-			}
-		}
+	// uart_irq_callback_set(cdc_dev, cdc_kbd_int_handler);
 
-		LOG_INF("DTR on device %s", cdc_dev[idx]->name);
-	}
-
-	/* Wait 1 sec for the host to do all settings */
-	k_busy_wait(USEC_PER_SEC);
-
-	uart_irq_callback_set(cdc_dev[0], cdc_mouse_int_handler);
-	uart_irq_callback_set(cdc_dev[1], cdc_kbd_int_handler);
-
-	write_data(cdc_dev[0], welcome, strlen(welcome));
-	write_data(cdc_dev[0], cdc_dev[0]->name, strlen(cdc_dev[0]->name));
-	write_data(cdc_dev[0], banner0, strlen(banner0));
-	write_data(cdc_dev[1], welcome, strlen(welcome));
-	write_data(cdc_dev[1], cdc_dev[1]->name, strlen(cdc_dev[1]->name));
-	write_data(cdc_dev[1], banner1, strlen(banner1));
-
-	uart_irq_rx_enable(cdc_dev[0]);
-	uart_irq_rx_enable(cdc_dev[1]);
+	// uart_irq_rx_enable(cdc_dev);
+	int cnt = 0;
+	uint32_t b_fade = 0;
 
 	while (true) {
-		k_sem_take(&evt_sem, K_FOREVER);
+		// k_sem_take(&evt_sem, K_FOREVER);
+		if (cnt++ == 1000)
+		{
+			cnt = 0;
+		}
+		int32_t fade = blue_led.period * sin((double)cnt / 1000.0 * 3.14);
+		uint32_t ufade = fade < 0 ? -fade : fade;
+
+		k_msleep(1);
+		if(bt_disconnected)
+		{
+			if (b_fade != ufade)
+			{
+				b_fade = ufade;
+				ret = pwm_set_dt(&blue_led, blue_led.period, ufade);
+
+				if (ret < 0)
+				{
+					printk("Error: Failed to set PWM value.\n");
+					return 0;
+				}
+			}
+		}
+		else //connected
+		{
+			if (b_fade != blue_led.period)
+			{
+				b_fade = blue_led.period;
+				ret = pwm_set_dt(&blue_led, blue_led.period, blue_led.period);
+
+				if (ret < 0)
+				{
+					printk("Error: Failed to set PWM value.\n");
+					return 0;
+				}
+			}
+		}
+		// ret = pwm_set_dt(&blue_led, blue_led.period, ufade);
+
+		if (ret < 0)
+		{
+			printk("Error: Failed to set PWM value.\n");
+			return 0;
+		}
 
 		while ((ev = app_evt_get()) != NULL) {
 			switch (ev->event_type) {
 			case GPIO_BUTTON_0:
 			{
-				/* Move the mouse in random direction */
-				uint8_t rep[] = {0x00, sys_rand32_get(),
-					      sys_rand32_get(), 0x00};
-
-				k_sem_take(&usb_sem, K_FOREVER);
-				hid_int_ep_write(hid0_dev, rep,
-						 sizeof(rep), NULL);
-				write_data(cdc_dev[0], gpio0, strlen(gpio0));
-				clear_mouse_report();
-				break;
-			}
-			case GPIO_BUTTON_1:
-			{
-				/* Press left mouse button */
-				uint8_t rep[] = {0x00, 0x00, 0x00, 0x00};
-
-				rep[MOUSE_BTN_REPORT_POS] |= MOUSE_BTN_LEFT;
-				k_sem_take(&usb_sem, K_FOREVER);
-				hid_int_ep_write(hid0_dev, rep,
-						 sizeof(rep), NULL);
-				write_data(cdc_dev[0], gpio1, strlen(gpio1));
-				clear_mouse_report();
-				break;
-			}
-			case GPIO_BUTTON_2:
-			{
-				/* Send string on HID keyboard */
-				write_data(cdc_dev[1], gpio2, strlen(gpio2));
-				if (strlen(string) > 0) {
-					struct app_evt_t *ev2 = app_evt_alloc();
-
-					ev2->event_type = HID_KBD_STRING,
-					app_evt_put(ev2);
-					str_pointer = 0U;
-					k_sem_give(&evt_sem);
-				}
-				break;
-			}
-			case GPIO_BUTTON_3:
-			{
-				/* Toggle CAPS LOCK */
+								/* RESET key */
 				uint8_t rep[] = {0x00, 0x00, 0x00, 0x00,
 					      0x00, 0x00, 0x00,
-					      HID_KEY_CAPSLOCK};
+					      0x00};
 
-				k_sem_take(&usb_sem, K_FOREVER);
-				hid_int_ep_write(hid1_dev, rep,
-						 sizeof(rep), NULL);
-				write_data(cdc_dev[1], gpio3, strlen(gpio3));
+				hid_keyboard_send_report(rep);
+				// hid_int_ep_write(hid0_dev, rep,
+				// 		 sizeof(rep), NULL);
+				write_data(cdc_dev, gpio0, strlen(gpio0));
 				clear_kbd_report();
 				break;
 			}
-			case CDC_UP:
+			case LED_SIGNAL_0:
 			{
-				/* Mouse up */
-				uint8_t rep[] = {0x00, 0x00, 0xE0, 0x00};
+				gpio_pin_set_dt(&led0, 1);
+				k_msleep(50);
+				gpio_pin_set_dt(&led0, 0);
+				k_msleep(50);
+				/* LED Signal 0 */
 
-				k_sem_take(&usb_sem, K_FOREVER);
-				hid_int_ep_write(hid0_dev, rep,
-						 sizeof(rep), NULL);
-				write_data(cdc_dev[0], up, strlen(up));
-				clear_mouse_report();
 				break;
 			}
-			case CDC_DOWN:
+			case KEY_UNKNOWN:
 			{
-				/* Mouse down */
-				uint8_t rep[] = {0x00, 0x00, 0x20, 0x00};
+				printk("Unknown key event!\n");
+				uint8_t rep[8] = {0};
+				uint8_t rep2[8] = {0};
+				uint8_t crep[] = {0x00, 0x00, 0x00, 0x00,
+					      0x00, 0x00, 0x00, 0x00};
+				rep[2] = HID_KEY_E;
+				rep[3] = HID_KEY_R;
 
-				k_sem_take(&usb_sem, K_FOREVER);
-				hid_int_ep_write(hid0_dev, rep,
-						 sizeof(rep), NULL);
-				write_data(cdc_dev[0], down, strlen(down));
-				clear_mouse_report();
-				break;
-			}
-			case CDC_RIGHT:
-			{
-				/* Mouse right */
-				uint8_t rep[] = {0x00, 0x20, 0x00, 0x00};
+				rep2[2] = HID_KEY_R;
+				rep2[3] = HID_KEY_O;
+				rep2[4] = HID_KEY_R;
 
-				k_sem_take(&usb_sem, K_FOREVER);
-				hid_int_ep_write(hid0_dev, rep,
-						 sizeof(rep), NULL);
-				write_data(cdc_dev[0], right, strlen(right));
-				clear_mouse_report();
-				break;
-			}
-			case CDC_LEFT:
-			{
-				/* Mouse left */
-				uint8_t rep[] = {0x00, 0xE0, 0x00, 0x00};
-
-				k_sem_take(&usb_sem, K_FOREVER);
-				hid_int_ep_write(hid0_dev, rep,
-						 sizeof(rep), NULL);
-				write_data(cdc_dev[0], left, strlen(left));
-				clear_mouse_report();
+				hid_keyboard_send_report(rep);
+				hid_keyboard_send_report(crep);
+				hid_keyboard_send_report(rep2);
+				hid_keyboard_send_report(crep);
 				break;
 			}
 			case CDC_UNKNOWN:
 			{
-				write_data(cdc_dev[0], unknown, strlen(unknown));
-				write_data(cdc_dev[1], unknown, strlen(unknown));
+				write_data(cdc_dev, unknown, strlen(unknown));
 				break;
 			}
 			case CDC_STRING:
 			{
-				write_data(cdc_dev[0], set_str, strlen(set_str));
-				write_data(cdc_dev[0], string, strlen(string));
-				write_data(cdc_dev[0], endl, strlen(endl));
+				write_data(cdc_dev, set_str, strlen(set_str));
+				// write_data(cdc_dev, string, strlen(string));
+				write_data(cdc_dev, endl, strlen(endl));
 
-				write_data(cdc_dev[1], set_str, strlen(set_str));
-				write_data(cdc_dev[1], string, strlen(string));
-				write_data(cdc_dev[1], endl, strlen(endl));
-				break;
-			}
-			case HID_MOUSE_CLEAR:
-			{
-				/* Clear mouse report */
-				uint8_t rep[] = {0x00, 0x00, 0x00, 0x00};
-
-				k_sem_take(&usb_sem, K_FOREVER);
-				hid_int_ep_write(hid0_dev, rep,
-						 sizeof(rep), NULL);
 				break;
 			}
 			case HID_KBD_CLEAR:
@@ -784,52 +606,13 @@ int main(void)
 				uint8_t rep[] = {0x00, 0x00, 0x00, 0x00,
 					      0x00, 0x00, 0x00, 0x00};
 
-				k_sem_take(&usb_sem, K_FOREVER);
-				hid_int_ep_write(hid1_dev, rep,
-						 sizeof(rep), NULL);
-				break;
-			}
-			case HID_KBD_STRING:
-			{
-				int ch = ascii_to_hid(string[str_pointer]);
-
-				if (ch == -1) {
-					LOG_WRN("Unsupported character: %d",
-						string[str_pointer]);
-				} else {
-					uint8_t rep[] = {0x00, 0x00, 0x00, 0x00,
-						      0x00, 0x00, 0x00, 0x00};
-					if (needs_shift(string[str_pointer])) {
-						rep[0] |=
-						HID_KBD_MODIFIER_RIGHT_SHIFT;
-					}
-					rep[7] = ch;
-
-					k_sem_take(&usb_sem, K_FOREVER);
-					hid_int_ep_write(hid1_dev, rep,
-							sizeof(rep), NULL);
-				}
-
-				str_pointer++;
-
-				if (strlen(string) > str_pointer) {
-					struct app_evt_t *ev2 = app_evt_alloc();
-
-					ev2->event_type = HID_KBD_STRING,
-					app_evt_put(ev2);
-					k_sem_give(&evt_sem);
-				} else if (strlen(string) == str_pointer) {
-					clear_kbd_report();
-				}
-
+				hid_keyboard_send_report(rep);
 				break;
 			}
 			default:
 			{
-				LOG_ERR("Unknown event to execute");
-				write_data(cdc_dev[0], evt_fail,
-					   strlen(evt_fail));
-				write_data(cdc_dev[1], evt_fail,
+				printk("Unknown event to execute");
+				write_data(cdc_dev, evt_fail,
 					   strlen(evt_fail));
 				break;
 			}
