@@ -38,7 +38,7 @@ To fully utilize this firmware, you can use the **HID BLE Relay Host**, a macOS 
 - Relaying keyboard inputs over BLE to this dongle.
 
 Visit the **HID BLE Relay Host** repository for more information:  
-[HID BLE Relay Host](https://github.com/saga0619/HID-Relay-Host)
+[HID BLE Relay Host](https://github.com/saga0619/HID_BLE_relay_host)
 
 ---
 
@@ -48,17 +48,19 @@ Visit the **HID BLE Relay Host** repository for more information:
 Ensure you have Nordic Connect SDK version 2.8.0 installed and properly configured.
 
 ```bash
-git clone <repository-url>
-cd <repository-directory>
+git clone https://github.com/saga0619/HID_BLE_relay_dongle.git
+cd HID_BLE_relay_dongle
 west build -b nrf52840dongle_nrf52840
-west flash
 ```
 
-### 2. BLE Connection
+### 2. Flash the Firmware
+- Flash the firmware with nRF Connect::Programmer
+
+### 3. BLE Connection
 - Power on the nRF52840 Dongle and plug it into a USB port.
 - Pair with a laptop or other BLE central device using the custom UUIDs.
 
-### 3. USB HID Keyboard
+### 4. USB HID Keyboard
 - Once connected, the dongle will act as a USB HID keyboard for the server or headless system.
 
 ---
