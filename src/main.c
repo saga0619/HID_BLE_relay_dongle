@@ -14,37 +14,12 @@
 #include <zephyr/usb/class/usb_hid.h>
 #include <zephyr/usb/class/usb_cdc.h>
 
-#include <zephyr/bluetooth/bluetooth.h>
-#include <zephyr/bluetooth/services/nus.h>
-#include <zephyr/bluetooth/conn.h>
-
 #include "hid_keyboard.h"
 
+#include <zephyr/bluetooth/bluetooth.h>
 
-#undef BT_UUID_NUS_SRV_VAL
-#undef BT_UUID_NUS_RX_VAL
-#undef BT_UUID_NUS_TX_VAL
-
-/* Service: 597f1290-5b99-477d-9261-f0ed801fc566 → LE: 66 c5 1f 80 ed f0 61 92 7d 47 99 5b 90 12 7f 59 */
-#define BT_UUID_NUS_SRV_VAL \
-	0x66, 0xc5, 0x1f, 0x80, \
-	0xed, 0xf0, 0x61, 0x92, \
-	0x7d, 0x47, 0x99, 0x5b, \
-	0x90, 0x12, 0x7f, 0x59
-
-/* RX: 597f1291-5b99-477d-9261-f0ed801fc566 → LE: 66 c5 1f 80 ed f0 61 92 7d 47 99 5b 91 12 7f 59 */
-#define BT_UUID_NUS_RX_VAL \
-	0x66, 0xc5, 0x1f, 0x80, \
-	0xed, 0xf0, 0x61, 0x92, \
-	0x7d, 0x47, 0x99, 0x5b, \
-	0x91, 0x12, 0x7f, 0x59
-
-/* TX: 597f1292-5b99-477d-9261-f0ed801fc566 → LE: 66 c5 1f 80 ed f0 61 92 7d 47 99 5b 92 12 7f 59 */
-#define BT_UUID_NUS_TX_VAL \
-	0x66, 0xc5, 0x1f, 0x80, \
-	0xed, 0xf0, 0x61, 0x92, \
-	0x7d, 0x47, 0x99, 0x5b, \
-	0x92, 0x12, 0x7f, 0x59
+#include "ble_hidrelay.h"
+#include <math.h>
 
 #define DEVICE_NAME		CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN		(sizeof(DEVICE_NAME) - 1)
@@ -248,20 +223,13 @@ static void status_cb(enum usb_dc_status_code status, const uint8_t *param)
 	printk("Status %d", status);
 }
 
-static struct bt_uuid_128 my_service_uuid = BT_UUID_INIT_128(
-    0x66, 0xc5, 0x1f, 0x80,
-    0xed, 0xf0, 0x61, 0x92,
-    0x7d, 0x47, 0x99, 0x5b,
-    0x9a, 0x12, 0x7f, 0x59
-);
-
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
 	BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
 };
 
 static const struct bt_data sd[] = {
-	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_NUS_SRV_VAL),
+	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_HIDRELAY_SVC_VAL),
 };
 
 static bool bt_disconnected = true;
@@ -292,7 +260,6 @@ static void add_key(uint8_t key)
             return;
         }
     }
-    /* 배열이 가득 찼을 경우 로직(에러 처리 등) 필요 시 추가 */
 }
 
 /* pressed_keys 배열에서 key 제거 */
@@ -412,11 +379,10 @@ static void received(struct bt_conn *conn, const void *data, uint16_t len, void 
 
 }
 
-struct bt_nus_cb nus_listener = {
+static struct bt_hidrelay_cb hidrelay_cb = {
 	.notif_enabled = notif_enabled,
-	.received = received,
+	.received      = received,
 };
-
 
 #define DEVICE_AND_COMMA(node_id) DEVICE_DT_GET(node_id),
 
@@ -453,21 +419,20 @@ int main(void)
 		return err;
 	}
 
+	err = bt_hidrelay_init(&hidrelay_cb, NULL);
+	if (err) {
+		printk("Failed to register HIDRelay cb (err %d)\n", err);
+		return err;
+	}
+	printk("HIDRelay service registered\n");
+
+
 	err = bt_le_adv_start(BT_LE_ADV_CONN, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 	if (err) {
-		printk("Failed to start advertising: %d\n", err);
-		return err;
+		printk("Advertising failed to start (err %d)\n", err);
+		return 0;
 	}
-
-	err = bt_nus_cb_register(&nus_listener, NULL);
-	if (err) {
-		printk("Failed to register NUS callback: %d\n", err);
-		return err;
-	}
-	
-
-	/* Configure devices */
-
+	printk("Advertising started with HIDRelay UUID\n");
 
 
 	if (!device_is_ready(cdc_dev)) {
@@ -489,14 +454,10 @@ int main(void)
 		return 0;
 	}
 
-	// uart_irq_callback_set(cdc_dev, cdc_kbd_int_handler);
-
-	// uart_irq_rx_enable(cdc_dev);
 	int cnt = 0;
 	uint32_t b_fade = 0;
 
 	while (true) {
-		// k_sem_take(&evt_sem, K_FOREVER);
 		if (cnt++ == 1000)
 		{
 			cnt = 0;
