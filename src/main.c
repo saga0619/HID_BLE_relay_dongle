@@ -14,7 +14,7 @@
 #include <zephyr/usb/class/usb_hid.h>
 #include <zephyr/usb/class/usb_cdc.h>
 
-#include "hid_keyboard.h"
+#include "hid_km.h"
 
 #include <zephyr/bluetooth/bluetooth.h>
 
@@ -144,15 +144,8 @@ static const char *evt_fail	=	"Unknown event detected!\r\n";
 static const char *set_str	=	"String set to: ";
 static const char *endl		=	"\r\n";
 
-
-static void singal_led(void)
-{
-	struct app_evt_t *new_evt = app_evt_alloc();
-
-	new_evt->event_type = LED_SIGNAL_0;
-	app_evt_put(new_evt);
-	k_sem_give(&evt_sem);
-}
+static bool led_signal = false;
+static bool led_error_signal = false;
 
 static void clear_kbd_report(void)
 {
@@ -500,6 +493,12 @@ int main(void)
 	int cnt = 0;
 	uint32_t b_fade = 0;
 
+	// int led_blink = 0;
+	int led_blink_cnt = 0;
+	int led_err_blink_cnt = 0;
+
+	const int led_blink_interval = 30;
+
 	while (true) {
 		if (cnt++ == 1000)
 		{
@@ -543,6 +542,41 @@ int main(void)
 		{
 			printk("Error: Failed to set PWM value.\n");
 			return 0;
+		}
+		if (led_error_signal && led_err_blink_cnt == 0)
+		{
+			led_error_signal = false;
+			led_err_blink_cnt = led_blink_interval * 2;
+		}
+
+		if (led_signal && led_blink_cnt == 0)
+		{
+			led_signal = false;
+			led_blink_cnt = led_blink_interval * 2;
+		}
+
+		if(led_err_blink_cnt > 0)
+		{
+			if (led_err_blink_cnt-- < led_blink_interval)
+			{
+				pwm_set_dt(&red_led, red_led.period, 0);
+			}
+			else
+			{
+				pwm_set_dt(&red_led, red_led.period, red_led.period);
+			}
+		}
+
+		if(led_blink_cnt > 0)
+		{
+			if (led_blink_cnt-- < led_blink_interval)
+			{
+				gpio_pin_set_dt(&led0, 0);
+			}
+			else
+			{
+				gpio_pin_set_dt(&led0, 1);
+			}
 		}
 
 		while ((ev = app_evt_get()) != NULL) {
