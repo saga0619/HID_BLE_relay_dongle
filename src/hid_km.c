@@ -1,4 +1,4 @@
-#include "hid_keyboard.h"
+#include "hid_km.h"
 #include "usb_hid_keys.h"
 
 #include <zephyr/kernel.h>
