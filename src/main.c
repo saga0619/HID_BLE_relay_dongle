@@ -394,7 +394,7 @@ static void received(struct bt_conn *conn, const void *data, uint16_t len, void 
 				}
 				else if (action == 'S' || action == 'E')
 				{
-					hid_mouse_abs_clear();
+					hid_mouse_abs_send(0,x_pos,y_pos);
 				}
 			}
 		}
