@@ -1,6 +1,6 @@
 # HID BLE Relay Dongle
 
-The **HID BLE Relay Dongle** is a firmware for the **nRF52840 Dongle** that bridges keyboard input from a Bluetooth-connected laptop to a USB-connected server or headless system. It operates as a BLE peripheral and functions as a USB HID keyboard, seamlessly relaying inputs for remote control scenarios.
+The **HID BLE Relay Dongle** is a firmware for the **nRF52840 Dongle** that bridges keyboard and mouse input from a Bluetooth-connected PC to a USB-connected server or headless system. It operates as a BLE peripheral and functions as a USB HID keyboard, seamlessly relaying inputs for remote control scenarios.
 ![Simple decription](./hidble.png)
 
 ---
@@ -8,7 +8,7 @@ The **HID BLE Relay Dongle** is a firmware for the **nRF52840 Dongle** that brid
 ## Features
 
 - **Bluetooth LE Peripheral**: Connects to a laptop using BLE.
-- **USB HID Keyboard**: Transmits keyboard inputs to a connected server or headless system via USB.
+- **USB HID Keyboard and Mouse**: Transmits keyboard inputs to a connected server or headless system via USB.
 - **Custom UUID Support**: Uses custom Nordic UART Service (NUS) UUIDs for BLE communication.
 
 ---
@@ -35,11 +35,12 @@ This firmware uses the following custom UUIDs for the Nordic UART Service:
 ## Related Project: HID BLE Relay Host
 
 To fully utilize this firmware, you can use the **HID BLE Relay Host**, a macOS application that complements this dongle by:
-- Capturing HDMI video from a USB capture card.
-- Relaying keyboard inputs over BLE to this dongle.
+- Relaying keyboard & mouse inputs over BLE to this dongle.
 
-Visit the **HID BLE Relay Host** repository for more information:  
+Visit the **HID BLE Relay Host** repository for more information:
 [HID BLE Relay Host](https://github.com/saga0619/HID_BLE_relay_host)
+HID BLE Relay Host Captures HDMI video from a USB capture card, and send keyboard and mouse inputs to the HID BLE Relay dongle.
+Cheap usb capture card is also good.
 
 ---
 
@@ -61,8 +62,8 @@ west build -b nrf52840dongle_nrf52840
 - Power on the nRF52840 Dongle and plug it into a USB port.
 - Pair with a laptop or other BLE central device using the custom UUIDs.
 
-### 4. USB HID Keyboard
-- Once connected, the dongle will act as a USB HID keyboard for the server or headless system.
+### 4. USB HID Keyboard & Mouse
+- Once connected, the dongle will act as a USB HID keyboard and mouse for the server or headless system.
 
 ---
 
