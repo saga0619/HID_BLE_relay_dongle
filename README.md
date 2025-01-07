@@ -1,6 +1,6 @@
 # HID BLE Relay Dongle
 
-The **HID BLE Relay Dongle** is a firmware for the **nRF52840 Dongle** that bridges keyboard and mouse input from a Bluetooth-connected PC to a USB-connected server or headless system. It operates as a BLE peripheral and functions as a USB HID keyboard, seamlessly relaying inputs for remote control scenarios.
+The **HID BLE Relay Dongle** is a firmware for the **nRF52840 Dongle** that bridges keyboard and mouse input from a Bluetooth-connected PC to a USB-connected server or headless system. It operates as a BLE peripheral and functions as a USB HID keyboard, seamlessly relaying inputs. Now you can control headless PC with your own laptop without relying on additional keybaord/mouse/dispaly. This project is like cheap kvm.
 ![Simple decription](./hidble_b.png)
 
 ---
