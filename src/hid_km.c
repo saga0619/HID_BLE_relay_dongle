@@ -32,125 +32,6 @@ typedef struct {
 #define DataVarAbs 0x02
 
 
-// #define HID_USAGE_PAGE_DIGITIZER          0x0D
-// #define HID_USAGE_DIGITIZER_TOUCH_SCREEN  0x04
-// #define HID_USAGE_DIGITIZER_CONTACT_COUNT 0x54
-// #define HID_USAGE_DIGITIZER_CONTACT_ID    0x51
-
-// #define SIMPLE_HID_TOUCH_REPORT_DESC() {                \
-//     HID_USAGE_PAGE(0x0D),       /* Usage Page (Digitizer) */ \
-//     HID_USAGE(0x04),            /* Usage (Touch Screen) */   \
-//     HID_COLLECTION(0x01),       /* Application Collection */ \
-//         HID_USAGE(0x42),        /* Usage (Tip Switch) */     \
-//         HID_LOGICAL_MIN8(0x00), \
-//         HID_LOGICAL_MAX8(0x01), \
-//         HID_REPORT_SIZE(1),     \
-//         HID_REPORT_COUNT(1),    \
-//         HID_INPUT(0x02),        /* Data, Variable, Absolute */ \
-//         HID_USAGE(0x30),        /* Usage (X) */              \
-//         HID_LOGICAL_MIN16(0x00, 0x00), \
-//         HID_LOGICAL_MAX16(0xF4, 0x08), \
-//         HID_REPORT_SIZE(16),    \
-//         HID_REPORT_COUNT(1),    \
-//         HID_INPUT(0x02),        /* Data, Variable, Absolute */ \
-//         HID_USAGE(0x31),        /* Usage (Y) */              \
-//         HID_LOGICAL_MIN16(0x00, 0x00), \
-//         HID_LOGICAL_MAX16(0xBE, 0x05), \
-//         HID_REPORT_SIZE(16),    \
-//         HID_REPORT_COUNT(1),    \
-//         HID_INPUT(0x02),        /* Data, Variable, Absolute */ \
-//     HID_END_COLLECTION          \
-// }
-
-// #define HID_TOUCH_REPORT_DESC() {                            \
-//     HID_USAGE_PAGE(HID_USAGE_PAGE_DIGITIZER),                \
-//     HID_USAGE(HID_USAGE_DIGITIZER_TOUCH_SCREEN),             \
-//     HID_COLLECTION(HID_COLLECTION_APPLICATION),              \
-//         /* Contact Data */                                   \
-//         HID_COLLECTION(HID_COLLECTION_LOGICAL),              \
-//             HID_USAGE(0x42), /* Tip Switch */                \
-//             HID_LOGICAL_MIN8(0x00),                          \
-//             HID_LOGICAL_MAX8(0x01),                          \
-//             HID_REPORT_SIZE(1),                              \
-//             HID_REPORT_COUNT(1),                             \
-//             HID_INPUT(DataVarAbs),                           \
-//             HID_USAGE(0x32), /* In Range */                  \
-//             HID_INPUT(DataVarAbs),                           \
-//             HID_REPORT_COUNT(6),                             \
-//             HID_REPORT_SIZE(8),                              \
-//             HID_INPUT(0x03), /* Constant */                  \
-//             HID_USAGE(HID_USAGE_DIGITIZER_CONTACT_ID),       \
-//             HID_LOGICAL_MIN8(0x00),                          \
-//             HID_LOGICAL_MAX8(0x01),                          \
-//             HID_REPORT_COUNT(1),                             \
-//             HID_INPUT(DataVarAbs),                           \
-//             HID_USAGE_PAGE(0x01), /* Generic Desktop */      \
-//             HID_USAGE(0x30), /* X Axis */                    \
-//             HID_LOGICAL_MIN16(0x00, 0x00),                   \
-//             HID_LOGICAL_MAX16(0xF4, 0x08),                   \
-//             HID_REPORT_SIZE(16),                             \
-//             HID_REPORT_COUNT(1),                             \
-//             HID_INPUT(DataVarAbs),                           \
-//             HID_USAGE(0x31), /* Y Axis */                    \
-//             HID_LOGICAL_MIN16(0x00, 0x00),                   \
-//             HID_LOGICAL_MAX16(0xBE, 0x05),                   \
-//             HID_REPORT_SIZE(16),                             \
-//             HID_REPORT_COUNT(1),                             \
-//             HID_INPUT(DataVarAbs),                           \
-//         HID_END_COLLECTION,                                  \
-//         HID_USAGE(HID_USAGE_DIGITIZER_CONTACT_COUNT),        \
-//         HID_LOGICAL_MIN8(0x00),                              \
-//         HID_LOGICAL_MAX8(0x01),                              \
-//         HID_REPORT_SIZE(8),                                  \
-//         HID_REPORT_COUNT(1),                                 \
-//         HID_INPUT(DataVarAbs),                               \
-//     HID_END_COLLECTION                                       \
-// }
-
-// #define HID_TOUCH_REPORT_DESC() {                            \
-//     HID_USAGE_PAGE(HID_USAGE_PAGE_DIGITIZER),                \
-//     HID_USAGE(HID_USAGE_DIGITIZER_TOUCH_SCREEN),             \
-//     HID_COLLECTION(HID_COLLECTION_APPLICATION),              \
-//         /* Contact Count */                                  \
-//         HID_USAGE(HID_USAGE_DIGITIZER_CONTACT_COUNT),        \
-//         HID_LOGICAL_MIN8(0x00),                              \
-//         HID_LOGICAL_MAX8(0x0A), /* Max 10 contacts */        \
-//         HID_REPORT_SIZE(8),                                  \
-//         HID_REPORT_COUNT(1),                                 \
-//         HID_INPUT(0x02), /* Data, Var, Abs */                \
-//         \
-//         /* Pointer Collection */                            \
-//         HID_USAGE_PAGE(HID_USAGE_GEN_DESKTOP),               \
-//         HID_USAGE(HID_USAGE_GEN_DESKTOP_POINTER),            \
-//         HID_COLLECTION(HID_COLLECTION_PHYSICAL),             \
-//             /* X Axis */                                     \
-//             HID_USAGE(HID_USAGE_GEN_DESKTOP_X),              \
-//             HID_LOGICAL_MIN16(0x00, 0x00),                   \
-//             HID_LOGICAL_MAX16(0xFF, 0x7F), /* 32767 */       \
-//             HID_REPORT_SIZE(16),                             \
-//             HID_REPORT_COUNT(1),                             \
-//             HID_INPUT(0x02), /* Data, Var, Abs */            \
-//             \
-//             /* Y Axis */                                     \
-//             HID_USAGE(HID_USAGE_GEN_DESKTOP_Y),              \
-//             HID_LOGICAL_MIN16(0x00, 0x00),                   \
-//             HID_LOGICAL_MAX16(0xFF, 0x7F), /* 32767 */       \
-//             HID_REPORT_SIZE(16),                             \
-//             HID_REPORT_COUNT(1),                             \
-//             HID_INPUT(0x02), /* Data, Var, Abs */            \
-//         HID_END_COLLECTION,                                  \
-//         \
-//         /* Contact ID */                                     \
-//         HID_USAGE_PAGE(HID_USAGE_PAGE_DIGITIZER),            \
-//         HID_USAGE(HID_USAGE_DIGITIZER_CONTACT_ID),           \
-//         HID_LOGICAL_MIN8(0x00),                              \
-//         HID_LOGICAL_MAX8(0x0A), /* Max 10 contacts */        \
-//         HID_REPORT_SIZE(8),                                  \
-//         HID_REPORT_COUNT(1),                                 \
-//         HID_INPUT(0x02), /* Data, Var, Abs */                \
-//     HID_END_COLLECTION                                       \
-// }
-
 static const uint8_t hid_mouse_abs_report_desc[]={
     0x05, 0x01,        /* Usage Page (Generic Desktop) */
     0x09, 0x02,        /* Usage (Mouse) */
@@ -486,25 +367,10 @@ bool get_hid_key(uint32_t qt_key, uint8_t *hid_key, uint8_t *modifier) {
     return false; // Key not found
 }
 
-// // Current modifier state
-// static uint8_t current_modifiers = 0;
-
-// // Function to update modifier state
-// void update_modifiers(uint8_t modifier, bool press, uint8_t *cmodifier) {
-//     if (press) {
-//         current_modifiers |= modifier;
-//     } else {
-//         current_modifiers &= ~modifier;
-//     }
-
-//     *cmodifier = current_modifiers;
-// }
-
 const struct device *hid0_dev;
 const struct device *hid1_dev;
 
 static const uint8_t hid_kbd_report_desc[] = HID_KEYBOARD_REPORT_DESC();
-// static const uint8_t hid_touch_report_desc[] = hid_mouse_abs_report_desc();
 
 static const struct hid_ops ops = {
 	.int_in_ready = in_ready_cb,
@@ -552,13 +418,12 @@ bool hid_keyboard_send_report(uint8_t *report)
 bool hid_mouse_abs_send(uint8_t buttons, uint16_t x, uint16_t y)
 {
     uint8_t report[5];
-    report[0] = buttons;        // 3개 버튼 비트 + padding
+    report[0] = buttons;        
     report[1] = (uint8_t)(x & 0xFF);
     report[2] = (uint8_t)(x >> 8);
     report[3] = (uint8_t)(y & 0xFF);
     report[4] = (uint8_t)(y >> 8);
     k_sem_take(&usb_sem, K_FOREVER);
-    // 세마포어 대기 등 필요 시 처리
     int err = hid_int_ep_write(hid1_dev, report, sizeof(report), NULL);
     return (err == 0);
 }
@@ -567,70 +432,7 @@ bool hid_mouse_abs_clear(void)
 {
     uint8_t report[5] = {0};
     k_sem_take(&usb_sem, K_FOREVER);
-    // 세마포어 대기 등 필요 시 처리
     int err = hid_int_ep_write(hid1_dev, report, sizeof(report), NULL);
     return (err == 0);
 }
-// bool hid_touch_send_report(uint8_t contact_count, uint16_t x, uint16_t y, uint8_t contact_id)
-// {
-//     uint8_t report[HID_REPORT_SIZE_TA];
-
-//     // Fill the report buffer
-//     // report[0] = (1 << 0) | (1 << 1);  // Tip Switch=1, In Range=1
-//     report[0] = contact_id;           // Contact ID
-//     report[1] = (uint8_t)(x & 0xFF);  // X Low byte
-//     report[2] = (uint8_t)(x >> 8);    // X High byte
-//     report[3] = (uint8_t)(y & 0xFF);  // Y Low byte
-//     report[4] = (uint8_t)(y >> 8);    // Y High byte
-//     report[5] = contact_count;        // Contact Count
-
-//     // Wait for USB semaphore to ensure previous transmission is complete
-//     k_sem_take(&usb_sem, K_FOREVER);
-
-//     // Send the HID report
-//     int ret = hid_int_ep_write(hid1_dev, report, HID_REPORT_SIZE_TA, NULL);
-//     if (ret) {
-//         printk("Failed to send touch report: %d\n", ret);
-//         return false;
-//     }
-//     else{
-//         for(int i = 0; i < HID_REPORT_SIZE_TA; i++)
-//         {
-//             printk("%02x ", report[i]);
-//         }
-//         printk("\n");
-//     }
-
-//     return true;
-// }
-
-// bool hid_touch_clear_report(void)
-// {
-//     uint8_t report[HID_REPORT_SIZE_TA] = {0};
-
-//     // Set contact count to 0 to indicate no active touches
-//     report[0] = 0x00; // Contact Count (1 byte)
-//     // All other values remain as 0, indicating no valid touch data
-
-//     // Wait for USB semaphore to ensure previous transmission is complete
-//     printk("Waiting for USB semaphore\n");
-//     k_sem_take(&usb_sem, K_FOREVER);
-//     printk("Waiting done\n");
-
-//     // Send the HID report
-//     int ret = hid_int_ep_write(hid1_dev, report, HID_REPORT_SIZE_TA, NULL);
-//     if (ret) {
-//         printk("Failed to send clear report: %d\n", ret);
-//         return false;
-//     }
-
-//     // Debug output
-//     printk("HID Touch Clear Report Sent:\n");
-//     for (int i = 0; i < sizeof(report); i++) {
-//         printk("%02X ", report[i]);
-//     }
-//     printk("\n");
-
-//     return true;
-// }
 
