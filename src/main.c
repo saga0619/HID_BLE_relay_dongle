@@ -365,7 +365,7 @@ static void received(struct bt_conn *conn, const void *data, uint16_t len, void 
 					{
 						printk("Key not found: %c:0x%x\n", action, qt_key);
 						struct app_evt_t *ev = app_evt_alloc();
-
+						led_error_signal = true;
 						ev->event_type = KEY_UNKNOWN,
 						app_evt_put(ev);
 						k_sem_give(&evt_sem);
@@ -399,6 +399,7 @@ static void received(struct bt_conn *conn, const void *data, uint16_t len, void 
 			}
 		}
 		else{
+			led_error_signal = true;
 			printk("Command not recognized: %s\n", token);
 			struct app_evt_t *ev = app_evt_alloc();
 
