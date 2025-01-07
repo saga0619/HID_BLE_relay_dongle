@@ -322,56 +322,99 @@ static void received(struct bt_conn *conn, const void *data, uint16_t len, void 
 
  	char *token = strtok(message, "\n");
     while (token != NULL) {
-        char action;
+		char device = token[0];
+        char action = token[1];
+
+		token = token + 3;
         uint32_t qt_key;
+		uint32_t x_pos, y_pos;			
+		
+		// printk("received : %c %c : %s\n", device, action, token);
 
         // Parse the action and key code
-        if (sscanf(token, "%c:0x%x", &action, &qt_key) == 2) {
-            bool is_press = (action == 'P');
+		if(device == 'K')
+		{
+			if (sscanf(token, "0x%x", &qt_key) == 1) {
+				// printk("Key: %c:0x%x\n", action, qt_key);
+				bool is_press = (action == 'P');
 
-            uint8_t hid_key = 0;
-            uint8_t modifier_mask  = 0;
+				uint8_t hid_key = 0;
+				uint8_t modifier_mask  = 0;
 
-            if (get_hid_key(qt_key, &hid_key, &modifier_mask )) {
-                if (modifier_mask != 0) {
-                    // It's a modifier key
-                    update_modifiers(modifier_mask, is_press);
-					// printk("Modifier mask: 0x%02x\n", modifier_mask);
+				if (get_hid_key(qt_key, &hid_key, &modifier_mask )) {
+					if (modifier_mask != 0) {
+						// It's a modifier key
+						update_modifiers(modifier_mask, is_press);
+						// printk("Modifier mask: 0x%02x\n", modifier_mask);
 
-					if (hid_key !=0)
-					{	//modifier key with regular key
+						if (hid_key !=0)
+						{	//modifier key with regular key
+							if (is_press) {
+								add_key(hid_key);
+							} else{
+								remove_key(hid_key);
+							}
+						}
+
+					} else {
+						// It's a regular key
 						if (is_press) {
 							add_key(hid_key);
 						} else{
 							remove_key(hid_key);
 						}
 					}
+					led_signal = true;
+					send_full_report();
+				}
+				else{
+					if(!is_press)
+					{
+						printk("Key not found: %c:0x%x\n", action, qt_key);
+						struct app_evt_t *ev = app_evt_alloc();
 
-                } else {
-                    // It's a regular key
-                    if (is_press) {
-						add_key(hid_key);
-					} else{
-						remove_key(hid_key);
-                    }
-                }
+						ev->event_type = KEY_UNKNOWN,
+						app_evt_put(ev);
+						k_sem_give(&evt_sem);
 
-				send_full_report();
-				singal_led();
-            }
-			else{
-				if(!is_press)
-				{
-					printk("Key not found: %c:0x%x\n", action, qt_key);
-					struct app_evt_t *ev = app_evt_alloc();
-
-					ev->event_type = KEY_UNKNOWN,
-					app_evt_put(ev);
-					k_sem_give(&evt_sem);
-
+					}
 				}
 			}
-        }
+		}
+		else if(device == 'M')
+		{
+			if(sscanf(token, "%u,%u", &x_pos, &y_pos) == 2) {
+				if(action == 'L' || action == 'R')
+				{
+					int button = 0;
+					if(action == 'L')
+					{
+						button = 1;
+					}
+					else if(action == 'R')
+					{
+						button = 2;
+					}
+					// printk("Touch: %d, %d\n", x_pos, y_pos);
+					led_signal = true;
+					hid_mouse_abs_send(button,x_pos,y_pos);
+				}
+				else if (action == 'S' || action == 'E')
+				{
+					hid_mouse_abs_clear();
+				}
+			}
+		}
+		else{
+			printk("Command not recognized: %s\n", token);
+			struct app_evt_t *ev = app_evt_alloc();
+
+			ev->event_type = CDC_UNKNOWN,
+			app_evt_put(ev);
+			k_sem_give(&evt_sem);
+		}
+
+        
 
         // Get the next token
         token = strtok(NULL, "\n");
