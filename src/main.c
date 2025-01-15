@@ -298,7 +298,8 @@ void update_modifiers(uint8_t modifier_mask, bool press)
     }
 	// printk("Current Modifiers: 0x%02x \n", current_modifiers);
 }
-
+static uint32_t x_pos = 0;
+static uint32_t y_pos = 0;	
 
 static void received(struct bt_conn *conn, const void *data, uint16_t len, void *ctx)
 {
@@ -320,7 +321,7 @@ static void received(struct bt_conn *conn, const void *data, uint16_t len, void 
 
 		token = token + 3;
         uint32_t qt_key;
-		uint32_t x_pos, y_pos;			
+		
 		
 		// printk("received : %c %c : %s\n", device, action, token);
 
@@ -390,11 +391,23 @@ static void received(struct bt_conn *conn, const void *data, uint16_t len, void 
 					}
 					// printk("Touch: %d, %d\n", x_pos, y_pos);
 					led_signal = true;
-					hid_mouse_abs_send(button,x_pos,y_pos);
+					hid_mouse_abs_send(button,x_pos,y_pos,0);
 				}
 				else if (action == 'S' || action == 'E')
 				{
-					hid_mouse_abs_send(0,x_pos,y_pos);
+					hid_mouse_abs_send(0,x_pos,y_pos,0);
+				}
+			}
+		}
+		else if(device == 'W')
+		{
+			int wheel = 0;
+			if(sscanf(token, "%d", &wheel) == 1) {
+				if(action == 'W')
+				{
+					// printk("Wheel: %d\n", x_pos);
+					led_signal = true;
+					hid_mouse_abs_send(0,x_pos,y_pos,wheel);
 				}
 			}
 		}

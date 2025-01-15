@@ -17,7 +17,7 @@ typedef struct {
     uint8_t modifier;
 } qt_to_hid_mapping_t;
 
-#define HID_REPORT_SIZE_M 5
+#define HID_REPORT_SIZE_M 6
 #define HID_REPORT_SIZE_T 7
 #define HID_REPORT_SIZE_K 8
 
@@ -70,6 +70,14 @@ static const uint8_t hid_mouse_abs_report_desc[]={
         0x75, 0x10,    /*     Report Size (16 bits) */
         0x95, 0x01,    /*     Report Count (1) */
         0x81, 0x02,    /*     Input (Data,Var,Abs) */
+        
+        // Wheel
+        0x09, 0x38,    //   Usage (Wheel)
+        0x15, 0x81,    //   Logical Minimum (-127)
+        0x25, 0x7F,    //   Logical Maximum (127)
+        0x75, 0x08,    //   Report Size (8 bit)
+        0x95, 0x01,    //   Report Count (1)
+        0x81, 0x06,    //   Input (Data,Var,Rel)
 
       0xc0,           /*   End Collection (Physical) */
     0xc0              /* End Collection (Application) */
@@ -411,27 +419,28 @@ bool hid_keyboard_init(void)
 
 bool hid_keyboard_send_report(uint8_t *report)
 {
-	k_sem_take(&usb_sem, K_FOREVER);
+	k_sem_take(&usb_sem, K_MSEC(100));
     return hid_int_ep_write(hid0_dev, report, HID_REPORT_SIZE_K, NULL);
 }
 
-bool hid_mouse_abs_send(uint8_t buttons, uint16_t x, uint16_t y)
+bool hid_mouse_abs_send(uint8_t buttons, uint16_t x, uint16_t y, int8_t wheel)
 {
-    uint8_t report[5];
+    uint8_t report[6];
     report[0] = buttons;        
     report[1] = (uint8_t)(x & 0xFF);
     report[2] = (uint8_t)(x >> 8);
     report[3] = (uint8_t)(y & 0xFF);
     report[4] = (uint8_t)(y >> 8);
-    k_sem_take(&usb_sem, K_FOREVER);
+    report[5] = (uint8_t)(wheel);
+    k_sem_take(&usb_sem, K_MSEC(100));
     int err = hid_int_ep_write(hid1_dev, report, sizeof(report), NULL);
     return (err == 0);
 }
 
 bool hid_mouse_abs_clear(void)
 {
-    uint8_t report[5] = {0};
-    k_sem_take(&usb_sem, K_FOREVER);
+    uint8_t report[6] = {0};
+    k_sem_take(&usb_sem, K_MSEC(100));
     int err = hid_int_ep_write(hid1_dev, report, sizeof(report), NULL);
     return (err == 0);
 }
