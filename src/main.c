@@ -312,118 +312,90 @@ static void received(struct bt_conn *conn, const void *data, uint16_t len, void 
     memcpy(message, data, copy_len);
     message[copy_len] = '\0'; // Null-terminate the string
 
-	// static bool mod_act = false;
-
  	char *token = strtok(message, "\n");
     while (token != NULL) {
+		/* Wire format: <device><action>:<payload> — minimum 4 bytes
+		 * (e.g. "MM:0"). Reject anything shorter to keep the payload
+		 * pointer below from running past the buffer. */
+		size_t tlen = strlen(token);
+		if (tlen < 4 || token[2] != ':') {
+			led_error_signal = true;
+			printk("Malformed token: '%s'\n", token);
+			token = strtok(NULL, "\n");
+			continue;
+		}
+
 		char device = token[0];
-        char action = token[1];
+		char action = token[1];
+		char *payload = token + 3;
+		uint32_t qt_key;
 
-		token = token + 3;
-        uint32_t qt_key;
-		
-		
-		// printk("received : %c %c : %s\n", device, action, token);
-
-        // Parse the action and key code
-		if(device == 'K')
-		{
-			if (sscanf(token, "0x%x", &qt_key) == 1) {
-				// printk("Key: %c:0x%x\n", action, qt_key);
+		if (device == 'K') {
+			if (sscanf(payload, "0x%x", &qt_key) == 1) {
 				bool is_press = (action == 'P');
-
 				uint8_t hid_key = 0;
-				uint8_t modifier_mask  = 0;
+				uint8_t modifier_mask = 0;
 
-				if (get_hid_key(qt_key, &hid_key, &modifier_mask )) {
+				if (get_hid_key(qt_key, &hid_key, &modifier_mask)) {
 					if (modifier_mask != 0) {
-						// It's a modifier key
 						update_modifiers(modifier_mask, is_press);
-						// printk("Modifier mask: 0x%02x\n", modifier_mask);
-
-						if (hid_key !=0)
-						{	//modifier key with regular key
+						if (hid_key != 0) {
 							if (is_press) {
 								add_key(hid_key);
-							} else{
+							} else {
 								remove_key(hid_key);
 							}
 						}
-
 					} else {
-						// It's a regular key
 						if (is_press) {
 							add_key(hid_key);
-						} else{
+						} else {
 							remove_key(hid_key);
 						}
 					}
 					led_signal = true;
 					send_full_report();
-				}
-				else{
-					if(!is_press)
-					{
-						printk("Key not found: %c:0x%x\n", action, qt_key);
-						struct app_evt_t *ev = app_evt_alloc();
-						led_error_signal = true;
-						ev->event_type = KEY_UNKNOWN,
-						app_evt_put(ev);
-						k_sem_give(&evt_sem);
-
-					}
+				} else if (!is_press) {
+					printk("Key not found: %c:0x%x\n", action, qt_key);
+					struct app_evt_t *ev = app_evt_alloc();
+					led_error_signal = true;
+					ev->event_type = KEY_UNKNOWN;
+					app_evt_put(ev);
+					k_sem_give(&evt_sem);
 				}
 			}
-		}
-		else if(device == 'M')
-		{
-			if(sscanf(token, "%u,%u", &x_pos, &y_pos) == 2) {
-				if(action == 'L' || action == 'R')
-				{
-					int button = 0;
-					if(action == 'L')
-					{
-						button = 1;
-					}
-					else if(action == 'R')
-					{
-						button = 2;
-					}
-					// printk("Touch: %d, %d\n", x_pos, y_pos);
+		} else if (device == 'M') {
+			if (sscanf(payload, "%u,%u", &x_pos, &y_pos) == 2) {
+				int button = -1;
+				switch (action) {
+				case 'L': button = 1; break;        /* left press / drag */
+				case 'R': button = 2; break;        /* right press / drag */
+				case 'M': button = 0; break;        /* move, no button held */
+				case 'S':                           /* left release */
+				case 'E': button = 0; break;        /* right release */
+				}
+				if (button >= 0) {
 					led_signal = true;
-					hid_mouse_abs_send(button,x_pos,y_pos,0);
-				}
-				else if (action == 'S' || action == 'E')
-				{
-					hid_mouse_abs_send(0,x_pos,y_pos,0);
+					hid_mouse_abs_send((uint8_t)button, x_pos, y_pos, 0);
 				}
 			}
-		}
-		else if(device == 'W')
-		{
+		} else if (device == 'W' && action == 'W') {
 			int wheel = 0;
-			if(sscanf(token, "%d", &wheel) == 1) {
-				if(action == 'W')
-				{
-					// printk("Wheel: %d\n", x_pos);
-					led_signal = true;
-					hid_mouse_abs_send(0,x_pos,y_pos,wheel);
-				}
+			if (sscanf(payload, "%d", &wheel) == 1) {
+				if (wheel > 127)  wheel = 127;
+				if (wheel < -127) wheel = -127;
+				led_signal = true;
+				hid_mouse_abs_send(0, x_pos, y_pos, (int8_t)wheel);
 			}
-		}
-		else{
+		} else {
 			led_error_signal = true;
 			printk("Command not recognized: %s\n", token);
 			struct app_evt_t *ev = app_evt_alloc();
-
-			ev->event_type = CDC_UNKNOWN,
+			ev->event_type = CDC_UNKNOWN;
 			app_evt_put(ev);
 			k_sem_give(&evt_sem);
 		}
 
-        
-
-        // Get the next token
         token = strtok(NULL, "\n");
 	}
 
